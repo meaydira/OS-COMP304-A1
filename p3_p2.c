@@ -24,7 +24,7 @@
 #define MESSAGESIZE 10
 #define READ_END    0
 #define WRITE_END    1
-#define BUFFERSIZE PIPE_BUF
+#define BUFFERSIZE 64000
 
 int fsize(FILE *fp){
     int prev=ftell(fp);
@@ -48,7 +48,6 @@ void convertToHex(char str[], char output[], int size)
 
 
 void writeToPipe(int fd[2], char string[], long stell){
-    
     close(fd[READ_END]);
     write(fd[WRITE_END], &stell, sizeof(stell));
     write(fd[WRITE_END], string, stell+1);
@@ -213,7 +212,7 @@ int main()
         }else{
             //parent
             char *buffer;
-            FILE *fp = fopen("try.txt", "r");
+            FILE *fp = stdin;
             if (fp != NULL)
             {
                 fseek(fp, 0L, SEEK_END);
@@ -221,11 +220,11 @@ int main()
                 rewind(fp);
                 char str[stell];
                 buffer = (char *)malloc(stell);
-                
+                 printf("Size is %d \n",stell);
                 if (buffer != NULL)
                 {
                     //fread(buffer, stell, 1, fp);
-                    
+            
                     fread(str,stell,1, fp);
                     // printf("%s", str);
                     fclose(fp);

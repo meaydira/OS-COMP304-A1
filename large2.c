@@ -19,6 +19,7 @@
 #include <sys/wait.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
+#include <limits.h>
 
 
 #define MESSAGESIZE 10
@@ -39,10 +40,10 @@ void convertToHex(char str[], char output[], int size)
     int count=0;
     int i =0;
     
-      for (int i = 0, j = 0; i < size; ++i, j += 2)
-      sprintf(output + j, "%02x", str[i] & 0xff);
-
-  //  printf("'%s' in hex is %s.\n", str, output);
+    for (int i = 0, j = 0; i < size; ++i, j += 2)
+        sprintf(output + j, "%02x", str[i] & 0xff);
+    
+    //  printf("'%s' in hex is %s.\n", str, output);
 }
 
 
@@ -51,23 +52,32 @@ void writeToPipe(int fd[2], char string[], long stell){
     
     close(fd[READ_END]);
     write(fd[WRITE_END], &stell, sizeof(stell));
-    write(fd[WRITE_END], string, stell+1);
+    char * str = string;
+    if(stell> PIPE_BUF){
+        printf("size is : %d \n", stell);
+        int count = stell+1;
+        
+        while(count > PIPE_BUF){
+            //   printf("count is : %d \n", count);
+            write(fd[WRITE_END], str, PIPE_BUF);
+            count= count - PIPE_BUF;
+            str+= PIPE_BUF;
+        }
+        //   printf("count is : %d \n", count);
+        write(fd[WRITE_END], str, count+1);
+        
+    }
+    
     close(fd[WRITE_END]);
 }
 
-static void readFromPipe(int pipefd[2], char input[],long size){
-    // wait(NULL);
-    close(pipefd[WRITE_END]);
-    read(pipefd[READ_END], input, size);
-    printf("child reads input, size : %d \n",size);
-    close(pipefd[READ_END]);
-}
+
 
 static long readSize(int pipefd[2]){
     long size;
     close(pipefd[WRITE_END]);
     read(pipefd[READ_END], &size, sizeof(size));
-    printf("Size is %d \n",size);
+    // printf("Size is %d \n",size);
     close(pipefd[READ_END]);
     return size;
 }
@@ -104,7 +114,6 @@ int main()
         perror(" pipe");
         return 0;
     }
-    
     int msqid = msgget(IPC_PRIVATE, IPC_CREAT | 0600);
     if (msqid == -1) {
         perror("msgget");
@@ -113,28 +122,47 @@ int main()
     }
     
     int msq2id = msgget(IPC_PRIVATE, IPC_CREAT | 0600);
-      if (msqid == -1) {
-          perror("msgget");
-          
-          exit(-1);
-      }
+    if (msqid == -1) {
+        perror("msgget");
+        
+        exit(-1);
+    }
+    
+    
+    
     
     childA_pid = fork();
     
         if(childA_pid == 0){
         //childA
-  
+        
         long SIZE;
         close(pipefd[WRITE_END]);
         read(pipefd[READ_END], &SIZE, sizeof(SIZE));
-        printf("Size is %d \n",SIZE);
+        // printf("Size is %d \n",SIZE);
+        // printf("Buffer size is %d \n",BUFFERSIZE);
         char input[SIZE];
-        read(pipefd[READ_END], input,SIZE);
+        int stell = SIZE;
+        char *p = input;
+        if(stell> PIPE_BUF){
+            int count = stell-1;
+            
+            while(count > PIPE_BUF){
+                read(pipefd[READ_END], p, PIPE_BUF);
+                count= count - PIPE_BUF;
+                p+= PIPE_BUF;
+            }
+            
+            read(pipefd[READ_END],p, count);
+            
+        }
+        printf("child reads input, size : %d \n",stell);
         close(pipefd[READ_END]);
         
         
-        printf("Child A here, input is read. \n");
-
+        printf("Child A here, input is read. input is : %d \n", strlen(input));
+        // printf("Size is %d : %s \n", strlen(input));
+        
         int shmfd = shm_open(shm_nameA, O_CREAT| O_RDWR, 0666);
         ftruncate(shmfd, SIZE);
         ptr_a =mmap(0,SIZE, PROT_WRITE|PROT_READ, MAP_SHARED, shmfd, 0);
@@ -165,55 +193,72 @@ int main()
         
         printf("Message: %s is sent from Child A. \n", message.mtext);
         
+        
     }
     else{
         childB_pid = fork();
         if(childB_pid == 0){
+            long SIZE;
+            close(pipefd2[WRITE_END]);
+            read(pipefd2[READ_END], &SIZE, sizeof(SIZE));
+            // printf("Size is %d \n",SIZE);
+            // printf("Buffer size is %d \n",BUFFERSIZE);
+            char input[SIZE];
+            int stell = SIZE;
+            char *p = input;
+            if(stell> PIPE_BUF){
+                int count = stell-1;
+                
+                while(count > PIPE_BUF){
+                    read(pipefd2[READ_END], p, PIPE_BUF);
+                    count= count - PIPE_BUF;
+                    p+= PIPE_BUF;
+                }
+                
+                read(pipefd2[READ_END],p, count);
+                
+            }
             
-             long SIZE;
-                  close(pipefd2[WRITE_END]);
-                  read(pipefd2[READ_END], &SIZE, sizeof(SIZE));
-                  printf("Size is %d \n",SIZE);
-                  char input[SIZE];
-                  read(pipefd2[READ_END], input,SIZE);
-                  close(pipefd2[READ_END]);
-            printf("Child B here, input read, size is: %d \n",SIZE);
+            printf("Child B here, input is read. length is : %d , input is : %s \n", strlen(input), input);
             
             
             int shmfd = shm_open(shm_nameB, O_CREAT| O_RDWR, 0666);
-                  ftruncate(shmfd, SIZE*2);
-                  ptr_b =mmap(0,SIZE*2, PROT_WRITE|PROT_READ, MAP_SHARED, shmfd, 0);
-                  if (ptr_b == MAP_FAILED) {
-                      printf("Map failed --- create \n");
-                      exit(-1);
-                  }
+            ftruncate(shmfd, SIZE*2);
+            ptr_b =mmap(0,SIZE*2, PROT_WRITE|PROT_READ, MAP_SHARED, shmfd, 0);
+            if (ptr_b == MAP_FAILED) {
+                perror("Map failed --- create \n");
+                exit(-1);
+            }
             
-                  printf("shared memory B created \n");
-                  
-                 char output[SIZE*2];
-                convertToHex(input, output, SIZE);
-                  
-                  sprintf(ptr_b,"%s",output);
-                  ptr_b += strlen(output);
+            ///
+            printf("shared memory B created \n");
             
-                struct message message;
-                  message.mtype = 1;
-                  memset(&(message.mtext), 0,MESSAGESIZE * sizeof(char));
-                  (void)strcpy(message.mtext, "Done");
-                  
-                  /* send message to queue */
-                  if (msgsnd(msq2id, &message,MESSAGESIZE, 0) == -1) {
-                      perror("msgsnd");
-                      
-                  }
-                  
-                  printf("Message: %s is sent from Child B. \n", message.mtext);
+            char output[SIZE*2];
+            convertToHex(input, output, SIZE);
+            
+            sprintf(ptr_b,"%s",output);
+            ptr_b += strlen(output);
+            
+            
+            struct message message;
+            message.mtype = 1;
+            memset(&(message.mtext), 0,MESSAGESIZE * sizeof(char));
+            (void)strcpy(message.mtext, "Done");
+            
+            /* send message to queue */
+            if (msgsnd(msq2id, &message,MESSAGESIZE, 0) == -1) {
+                perror("msgsnd");
+                
+            }
+            
+            printf("Message: %s is sent from Child B. \n", message.mtext);
             
             
         }else{
             //parent
             char *buffer;
-            FILE *fp = fopen("try.txt", "r");
+            FILE *fp = stdin;
+            
             if (fp != NULL)
             {
                 fseek(fp, 0L, SEEK_END);
@@ -236,8 +281,7 @@ int main()
                 
                 writeToPipe(pipefd2, str,stell);
                 writeToPipe(pipefd, str,stell);
-                printf("Input is written to pipes \n");
-                
+                //   printf("Input is written to pipes: size %d \n", stell);
                 
                 struct message message;
                 if (msgrcv(msqid, &message, MESSAGESIZE, 0, 0) == -1) {
@@ -254,7 +298,7 @@ int main()
                     printf("shared memory A failed\n");
                     exit(-1);
                 }
-           
+                
                 ptr = mmap(0,stell, PROT_READ, MAP_SHARED, shm_fd, 0);
                 if (ptr == MAP_FAILED) {
                     printf("Map failed --- opening \n");
@@ -269,38 +313,38 @@ int main()
                     exit(-1);
                 }
                 
-                struct message messageB;
                 
-                if (msgrcv(msq2id, &messageB, MESSAGESIZE, 0, 0) == -1) {
-                                 perror("msgrcv");
-                                 
-                                 exit(-1);
+            
+                              if (msgrcv(msq2id, &message, MESSAGESIZE, 0, 0) == -1) {
+                                  perror("msgrcv");
+                                  
+                                  exit(-1);
+                              }
+                
+                 printf("Messsage received from B is : %s\n", message.mtext);
+                
+                shm_fd = shm_open(shm_nameB, O_RDONLY, 0666);
+                if (shm_fd == -1) {
+                    printf("shared memory B failed\n");
+                    perror("memory fail");
+                    exit(-1);
                 }
-                             
-          
-                             
-                             
-                             shm_fd = shm_open(shm_nameB, O_RDONLY, 0666);
-                             if (shm_fd == -1) {
-                                 printf("shared memory B failed\n");
-                                 exit(-1);
-                             }
-                          
-                             ptr = mmap(0,stell*2, PROT_READ, MAP_SHARED, shm_fd, 0);
-                             if (ptr == MAP_FAILED) {
-                                 printf("Map failed --- opening \n");
-                                 exit(-1);
-                             }
-                             
                 
-                            fprintf(stderr,"Hex format from Child B is : %s \n",ptr);
-                             
-                            // printf("reading from  B : %s", ptr);
-                             
-                             if (shm_unlink(shm_nameB) == -1) {
-                                 printf("Error removing %s\n",shm_nameB);
-                                 exit(-1);
-                             }
+                ptr = mmap(0,stell*2, PROT_READ, MAP_SHARED, shm_fd, 0);
+                if (ptr == MAP_FAILED) {
+                    printf("Map failed --- opening \n");
+                    exit(-1);
+                }
+                
+                
+                fprintf(stderr,"Hex format from Child B is : %s \n",ptr);
+                
+                // printf("reading from  B : %s", ptr);
+                
+                if (shm_unlink(shm_nameB) == -1) {
+                    printf("Error removing %s\n",shm_nameB);
+                    exit(-1);
+                }
             }
             
         }
